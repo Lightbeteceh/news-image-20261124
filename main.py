@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """The World in One Day - 24 November 2026.
 
-Renders one deterministic 1024x1024 PNG summing up the world's news of
-Tuesday 24 November 2026, from stories.json in this same directory.
+Draws one deterministic 1024x1024 PNG summing up the world's news of
+Tuesday 24 November 2026, reading the story data from stories.json next
+to this file.
 
-No network. No clock, no randomness: the same input files always produce
-the same bytes. Run:  python3 main.py   (writes /output/entry.png)
-or set OUTPUT_PATH to choose the destination.
+No network, no clock, no randomness: identical inputs always give
+identical bytes. Run:  python3 main.py   (writes /output/entry.png)
+or set OUTPUT_PATH to pick another destination.
 """
 
 import json
@@ -38,19 +39,18 @@ TAG_FILL = {
     "FORECAST": MUTED,
 }
 
-
-def font(name, size):
-    return ImageFont.truetype(os.path.join(HERE, "fonts", name), size)
-
-
 SERIF = "DejaVuSerif.ttf"
 SERIF_B = "DejaVuSerif-Bold.ttf"
 SANS = "DejaVuSans.ttf"
 SANS_B = "DejaVuSans-Bold.ttf"
 
 
+def font(name, size):
+    return ImageFont.truetype(os.path.join(HERE, "fonts", name), size)
+
+
 def wrap(text, fnt, max_w, draw):
-    """Split text into lines that fit max_w pixels."""
+    """Greedy word wrap to lines no wider than max_w pixels."""
     words = text.split()
     lines, cur = [], ""
     for word in words:
@@ -67,61 +67,70 @@ def wrap(text, fnt, max_w, draw):
 
 
 def fit_lines(text, fnt, max_w, max_lines, draw):
-    """Wrap text, truncating with an ellipsis to max_lines."""
+    """Wrap text and clip to max_lines with an ellipsis if needed.
+
+    The ellipsis always follows a whole word, never a chopped one.
+    """
     lines = wrap(text, fnt, max_w, draw)
     if len(lines) <= max_lines:
         return lines
     lines = lines[:max_lines]
     while lines and draw.textlength(lines[-1] + "...", font=fnt) > max_w:
-        lines[-1] = lines[-1][:-1]
+        words = lines[-1].split()
+        if len(words) > 1:
+            lines[-1] = " ".join(words[:-1])
+        else:
+            lines[-1] = lines[-1][:-1]
     lines[-1] = lines[-1].rstrip() + "..."
     return lines
 
 
 def one_line(text, fnt, max_w, draw):
-    """Truncate text to a single line that fits max_w."""
+    """Clip text to a single fitting line with an ellipsis if needed.
+
+    Truncation always ends at a word boundary, never mid-word.
+    """
     if draw.textlength(text, font=fnt) <= max_w:
         return text
     while text and draw.textlength(text + "...", font=fnt) > max_w:
         text = text[:-1]
-    return text.rstrip() + "..."
+    text = text.rstrip()
+    if " " in text:
+        text = text.rsplit(" ", 1)[0]
+    return text + "..."
 
 
 def chip(draw, x, y, tag):
-    """Verification tag chip; returns its width."""
+    """Draw a verification-tag chip; return its pixel width."""
     fnt = font(SANS_B, 9)
-    label = tag
-    tw = draw.textlength(label, font=fnt)
+    tw = draw.textlength(tag, font=fnt)
     w = int(tw) + 10
     h = 15
     draw.rounded_rectangle([x, y, x + w, y + h], radius=3,
                            fill=TAG_FILL.get(tag, MUTED))
-    draw.text((x + 5, y + 2), label, font=fnt, fill=(255, 255, 255))
+    draw.text((x + 5, y + 2), tag, font=fnt, fill=(255, 255, 255))
     return w
 
 
 def source_line(draw, x, y, source, max_w, size=9, prefix="Source: "):
     fnt = font(SANS, size)
-    txt = prefix + source
-    draw.text((x, y), one_line(txt, fnt, max_w, draw),
+    draw.text((x, y), one_line(prefix + source, fnt, max_w, draw),
               font=fnt, fill=MUTED)
 
 
 def draw_art(draw, kind, box, accent):
-    """Flat vector illustration inside box (x0, y0, x1, y1)."""
+    """Small flat vector drawing inside box (x0, y0, x1, y1)."""
     x0, y0, x1, y1 = box
     cx = (x0 + x1) // 2
     cy = (y0 + y1) // 2
     w = x1 - x0
-    h = y1 - y0
     if kind == "tanker":
         draw.rectangle([x0 + 4, cy + 2, x1 - 4, cy + 16], fill=INK)
         draw.rectangle([x0 + 14, cy - 12, x0 + 34, cy + 2], fill=accent)
         draw.rectangle([x0 + 40, cy - 6, x0 + 52, cy + 2], fill=accent)
         draw.line([x0 + 44, cy - 18, x0 + 44, cy - 6], fill=INK, width=2)
-        draw.arc([x0 + 2, cy + 16, x0 + 26, cy + 26], 0, 180, fill=SKY, width=2)
-        draw.arc([x0 + 30, cy + 16, x0 + 54, cy + 26], 0, 180, fill=SKY, width=2)
-        draw.arc([x0 + 58, cy + 16, x0 + 82, cy + 26], 0, 180, fill=SKY, width=2)
+        for bx in (x0 + 2, x0 + 30, x0 + 58):
+            draw.arc([bx, cy + 16, bx + 24, cy + 26], 0, 180, fill=SKY, width=2)
     elif kind == "flag":
         draw.line([x0 + 8, y0 + 4, x0 + 8, y1 - 4], fill=INK, width=3)
         draw.polygon([(x0 + 8, y0 + 4), (x1 - 6, y0 + 12),
@@ -140,9 +149,11 @@ def draw_art(draw, kind, box, accent):
         draw.rectangle([x0 + 10, y0 + 10, x1 - 10, y1 - 6], fill=NAVY)
         for r in range(3):
             for c in range(3):
-                wx = x0 + 16 + c * 14
-                wy = y0 + 16 + r * 13
-                draw.rectangle([wx, wy, wx + 7, wy + 7], fill=PAPER)
+                # Keep every window inside the art box: the old 14 px
+                # spacing pushed the right column past x1 (and the card border).
+                wx = x0 + 13 + c * 11
+                wy = y0 + 15 + r * 9
+                draw.rectangle([wx, wy, wx + 6, wy + 6], fill=PAPER)
         draw.rectangle([x0 + 4, y1 - 6, x1 - 4, y1 - 2], fill=INK)
     elif kind == "satellite":
         draw.rectangle([cx - 12, cy - 8, cx + 12, cy + 8], fill=NAVY)
@@ -151,12 +162,14 @@ def draw_art(draw, kind, box, accent):
         draw.line([cx, cy + 8, cx + 10, cy + 18], fill=INK, width=2)
         draw.ellipse([cx + 6, cy + 14, cx + 16, cy + 24], outline=INK, width=2)
     elif kind == "ship":
+        # All coordinates stay inside the art box (x0..x1, y0..y1):
+        # the old second container ended 12 px past x1, crossing the card border.
         draw.polygon([(x0 + 6, cy + 4), (x1 - 6, cy + 4),
                       (x1 - 16, cy + 16), (x0 + 16, cy + 16)], fill=INK)
-        draw.rectangle([x0 + 16, cy - 12, x0 + 34, cy + 4], fill=accent)
-        draw.rectangle([x0 + 38, cy - 8, x0 + 54, cy + 4], fill=NAVY)
-        draw.arc([x0 + 2, cy + 16, x0 + 26, cy + 26], 0, 180, fill=SKY, width=2)
-        draw.arc([x0 + 30, cy + 16, x0 + 54, cy + 26], 0, 180, fill=SKY, width=2)
+        draw.rectangle([x0 + 12, cy - 12, x0 + 26, cy + 4], fill=accent)
+        draw.rectangle([x0 + 28, cy - 8, x0 + 40, cy + 4], fill=NAVY)
+        for bx in (x0 + 2, x0 + 20):
+            draw.arc([bx, cy + 16, bx + 18, cy + 26], 0, 180, fill=SKY, width=2)
     elif kind == "globe":
         draw.ellipse([x0 + 6, y0 + 4, x1 - 6, y1 - 4], outline=NAVY, width=2)
         draw.ellipse([cx - 12, y0 + 4, cx + 12, y1 - 4], outline=NAVY, width=1)
@@ -179,7 +192,7 @@ def draw_art(draw, kind, box, accent):
 
 
 def draw_map(draw, box, regions):
-    """Schematic world map with a pin per region and its story count."""
+    """Schematic world map with a numbered pin per region."""
     regions = {k.upper(): v for k, v in regions.items()}
     x0, y0, x1, y1 = box
     draw.rounded_rectangle([x0, y0, x1, y1], radius=6, fill=SKY)
@@ -206,9 +219,8 @@ def draw_map(draw, box, regions):
     for name, fx, fy in pins:
         px = int(x0 + mw * fx)
         py = int(y0 + mh * fy)
-        n = regions.get(name, 0)
+        label = str(regions.get(name, 0))
         draw.ellipse([px - 8, py - 8, px + 8, py + 8], fill=RED)
-        label = str(n)
         tw = draw.textlength(label, font=fnt)
         draw.text((px - tw / 2, py - 5), label, font=fnt, fill=(255, 255, 255))
     draw.text((x0 + 8, y1 - 14), "SCHEMATIC MAP — NOT TO SCALE",
@@ -226,10 +238,9 @@ def main():
     y = 22
 
     # ---- Masthead ----
-    title = data["title"]
     tf = font(SERIF_B, 52)
-    tw = draw.textlength(title, font=tf)
-    draw.text(((W - tw) / 2, y), title, font=tf, fill=INK)
+    tw = draw.textlength(data["title"], font=tf)
+    draw.text(((W - tw) / 2, y), data["title"], font=tf, fill=INK)
     y += 58
     sub = "%s  •  %d STORIES  •  8 REGIONS  •  ONE DAY" % (
         data["date"], data["total_stories"])
@@ -270,16 +281,15 @@ def main():
     col_w = cw / 6
     for i, num in enumerate(data["numbers"]):
         x = mx + i * col_w
-        vf = font(SERIF_B, 22)
-        draw.text((x + 4, y), num["value"], font=vf, fill=RED)
+        draw.text((x + 4, y), num["value"], font=font(SERIF_B, 22), fill=RED)
         lines = fit_lines(num["label"], font(SANS, 9), col_w - 10, 2, draw)
-        ly = y + 28
+        ly = y + 26
         for ln in lines:
             draw.text((x + 4, ly), ln, font=font(SANS, 9), fill=INK)
             ly += 11
         if i:
             draw.line([x, y, x, y + 48], fill=MUTED, width=1)
-    y += 46
+    y += 50
     draw.line([mx, y, W - mx, y], fill=RULE, width=2)
     y += 6
 
@@ -306,14 +316,14 @@ def main():
     draw.text((tx, fy), one_line(lead["fact"], font(SANS, 10), twd, draw),
               font=font(SANS, 10), fill=MUTED)
     cw_chip = chip(draw, tx, fy + 15, lead["tag"])
-    source_line(draw, tx + cw_chip + 8, fy + 17, lead["source"], twd - cw_chip - 8)
+    source_line(draw, tx + cw_chip + 8, fy + 17, lead["source"],
+                twd - cw_chip - 8)
     draw.rectangle([mx, y, W - mx, y + 122], outline=RULE, width=1)
     y += 124
 
     # ---- Two big cards ----
-    big = data["big"]
     card_w = (cw - 12) // 2
-    for i, card in enumerate(big):
+    for i, card in enumerate(data["big"]):
         x = mx + i * (card_w + 12)
         draw.rectangle([x, y, x + card_w, y + 128], outline=RULE, width=1)
         aw = 84
@@ -332,7 +342,8 @@ def main():
         for ln in sm:
             draw.text((x + 10, sy), ln, font=font(SANS, 11), fill=INK)
             sy += 14
-        draw.text((x + 10, y + 96), card["fact"],
+        draw.text((x + 10, y + 96),
+                  one_line(card["fact"], font(SANS, 10), card_w - 20, draw),
                   font=font(SANS, 10), fill=MUTED)
         cw_chip = chip(draw, x + 10, y + 110, card["tag"])
         source_line(draw, x + 10 + cw_chip + 8, y + 112, card["source"],
@@ -340,11 +351,10 @@ def main():
     y += 130
 
     # ---- Ten small cards, 5 across x 2 rows ----
-    small = data["small"]
     cols, rows = 5, 2
     scw = (cw - 4 * 10) // cols
     sch = 108
-    for idx, card in enumerate(small):
+    for idx, card in enumerate(data["small"]):
         r, c = divmod(idx, cols)
         x = mx + c * (scw + 10)
         yy = y + r * (sch + 8)
@@ -372,7 +382,7 @@ def main():
     draw.text((mx, y), "WHERE IT HAPPENED",
               font=font(SANS_B, 13), fill=NAVY)
     y += 16
-    map_h = 80
+    map_h = 76
     map_w = int(cw * 0.62)
     draw_map(draw, (mx, y, mx + map_w, y + map_h), data["regions"])
     rx = mx + map_w + 14
@@ -383,9 +393,8 @@ def main():
     for j in range(0, 8, 2):
         for k in (0, 1):
             name = order[j + k]
-            n = rnorm.get(name, 0)
             xx = rx + k * 168
-            draw.text((xx, ry), "%s %d" % (name, n),
+            draw.text((xx, ry), "%s %d" % (name, rnorm.get(name, 0)),
                       font=font(SANS_B, 11), fill=INK)
         ry += 18
     draw.text((rx, ry + 2), "Counts = stories per region.",
@@ -402,6 +411,7 @@ def main():
     per_col = 9
     col_w = cw // 3
     fnt = font(SANS, 10)
+    tag_fnt = font(SANS_B, 8)
     for ci in range(3):
         chunk = items[ci * per_col:(ci + 1) * per_col]
         x = mx + ci * col_w
@@ -411,13 +421,13 @@ def main():
             prefix = "%d. " % num
             pw = draw.textlength(prefix, font=fnt)
             draw.text((x, ly), prefix, font=fnt, fill=RED)
-            avail = col_w - pw - 52
+            tag = it["tag"]
+            tw = draw.textlength(tag, font=tag_fnt)
+            avail = col_w - pw - tw - 14
             txt = one_line(it["text"], fnt, avail, draw)
             draw.text((x + pw, ly), txt, font=fnt, fill=INK)
-            tag = it["tag"]
-            tw = draw.textlength(tag, font=font(SANS_B, 8))
             draw.text((x + col_w - tw - 4, ly + 1), tag,
-                      font=font(SANS_B, 8), fill=TAG_FILL.get(tag, MUTED))
+                      font=tag_fnt, fill=TAG_FILL.get(tag, MUTED))
             ly += 12
     y += per_col * 12 + 2
 
